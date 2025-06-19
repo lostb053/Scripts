@@ -32,6 +32,15 @@ just a single click arr startup. can be added as startup program
 ## clist.py
 designed to compare simkl lists with shows/movies added in sonarr/radarr
 
+## sss.py
+designed to complement clist.py and add the shows to your radarr, sonarr instances
+
+> **why use this when import lists exists?**
+>
+> cuz this script can be scheduled to increase sync frequency instead of 6 hrs waiting period.
+> but that isn't what this script is for. it can also lookup titles and add the best match to your library (not always accurate)
+
+
 ## monitor.ps1
 monitors usage of private bytes and gives a prompt should the bytes exceed certain threshold, a very basic memory leak detector. takes arguments
 ```
