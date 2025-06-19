@@ -6,6 +6,7 @@ import requests
 from rapidfuzz import fuzz
 from typing import List, Dict
 
+
 # ===== USER CONFIG =====
 CONFIG = {
     "simkl": {
@@ -14,11 +15,29 @@ CONFIG = {
         "lists": ["watching", "plantowatch"]
     },
     "sonarr": [
-        {"url": "http://localhost:8989", "api_key": "xxx"},
-        {"url": "http://localhost:8990", "api_key": "xxx"}
+        {
+            "url": "http://localhost:8989",
+            "api_key": "xxx",
+            "type": "tv",
+            "root": r"H:\Media\TV Shows",
+            "profile_id": 18
+        },
+        {
+            "url": "http://localhost:8990",
+            "api_key": "xxx",
+            "type": "anime",
+            "root": r"/E/Media/Anime/Seasonal", # Docker path
+            "profile_id": 18
+        }
     ],
     "radarr": [
-        {"url": "http://localhost:7878", "api_key": "xxx"}
+        {
+            "url": "http://localhost:7878",
+            "api_key": "xxx",
+            "type": "movie",
+            "root": r"H:\Media\Movies",
+            "profile_id": 13
+        }
     ],
     "fuzzy_threshold": 100,
     "token_file": "simkl_token.json"
@@ -72,7 +91,24 @@ def get_auth_headers():
         "simkl-api-key": CONFIG['simkl']['client_id']
     }
 
-def get_simkl_list() -> List[Dict]:
+def read_exclude_list_from_failed_file(filename="failed.txt"):
+    try:
+        exclude = []
+        with open(filename, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                # Look for lines starting with "- " and containing trailing ##########
+                if line.startswith("- ") and "##########" in line:
+                    # Extract title (remove leading '- ' and trailing ##########)
+                    title = line[2:][:-11].strip()
+                    exclude.append(title)
+        return exclude
+    except FileNotFoundError:
+        print(f"⚠️ File '{filename}' not found. EXCLUDE list remains empty.")
+
+def get_simkl_list(exclude=None) -> List[Dict]:
+    if exclude:
+        EXCLUDE = exclude
     all_items = []
     headers = get_auth_headers()
     desired_statuses = set(CONFIG["simkl"]["lists"])
@@ -96,10 +132,17 @@ def get_simkl_list() -> List[Dict]:
 
             ids = item_data.get("ids", {})
             title = item_data.get("title", "Unknown title")
+            anime_type = 0
+            if "anime_type" in entry.keys():
+                anime_type = entry["anime_type"]
+            if title in EXCLUDE:
+                # Skip excluded titles
+                continue
             all_items.append({
                 "title": title,
                 "ids": ids,
-                "type": category
+                "type": category,
+                "anime_type": anime_type
             })
 
     return all_items
@@ -162,12 +205,18 @@ def fuzzy_match(simkl, others, threshold):
         for title in titles_to_check:
             score = fuzz.ratio(simkl_title, title)
             if score >= threshold:
-                return [True]
+                return [True, 100]
             best_score = max(best_score, score)
 
     return False, round(best_score, 1)
 
-def color(x):
+def color(x, _color = None):
+    if _color:
+        if _color == "red":
+            return f"\033[91m{x}\033[0m"
+        if _color == "green":
+            return f"\033[92m{x}\033[0m"
+        return x
     num_match = re.search(r"[-+]?[0-9]*\.?[0-9]+", x)
     if not num_match:
         return x  # return original if no number found
@@ -176,6 +225,8 @@ def color(x):
     return colored
 
 def main():
+    global EXCLUDE
+    EXCLUDE = read_exclude_list_from_failed_file()
     print("📥 Fetching Simkl list...")
     simkl_items = get_simkl_list()
 
