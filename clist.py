@@ -20,7 +20,7 @@ CONFIG = {
     "radarr": [
         {"url": "http://localhost:7878", "api_key": "xxx"}
     ],
-    "fuzzy_threshold": 99,
+    "fuzzy_threshold": 100,
     "token_file": "simkl_token.json"
 }
 # =======================
@@ -113,6 +113,7 @@ def get_sonarr_titles():
             for e in r.json():
                 all_titles.append({
                     "title": e["title"],
+                    "alternateTitles": e.get("alternateTitles", []),
                     "ids": {"tvdb": str(e.get("tvdbId", "")), "imdb": e.get("imdbId", "")}
                 })
         except Exception as e:
@@ -128,6 +129,7 @@ def get_radarr_titles():
             for e in res.json():
                 all_titles.append({
                     "title": e["title"],
+                    "alternateTitles": e.get("alternateTitles", []),
                     "ids": {"tmdb": str(e.get("tmdbId", "")), "imdb": e.get("imdbId", "")}
                 })
         except Exception as e:
@@ -142,20 +144,36 @@ def match_by_ids(simkl, others):
     return False
 
 def fuzzy_match(simkl, others, threshold):
+    simkl_title = simkl["title"].lower()
+    best_score = 0
+
     for other in others:
-        score = fuzz.ratio(simkl["title"].lower(), other["title"].lower())
-        if score >= threshold:
-            return [True]
-    return False, round(score, 1)
+        titles_to_check = [other["title"].lower()]
+
+        # Include alternate titles if they exist
+        alt_titles = other.get("alternateTitles", [])
+        for alt in alt_titles:
+            if isinstance(alt, dict) and "title" in alt:
+                titles_to_check.append(alt["title"].lower())
+            elif isinstance(alt, str):  # fallback if alt is just a string
+                titles_to_check.append(alt.lower())
+
+        # Compare Simkl title against all Sonarr/Radarr title variants
+        for title in titles_to_check:
+            score = fuzz.ratio(simkl_title, title)
+            if score >= threshold:
+                return [True]
+            best_score = max(best_score, score)
+
+    return False, round(best_score, 1)
 
 def color(x):
     num_match = re.search(r"[-+]?[0-9]*\.?[0-9]+", x)
     if not num_match:
         return x  # return original if no number found
     
-    colored = "\033[92m" if float(num_match.group()) >= 80 else "\033[91m" +x+"%\033[0m"
+    colored = f"""{"\033[92m" if float(num_match.group()) >= 80 else "\033[91m"}{x}\033[0m"""
     return colored
-
 
 def main():
     print("📥 Fetching Simkl list...")
@@ -166,6 +184,7 @@ def main():
 
     print("🔍 Comparing...")
     unmatched = []
+
     for item in simkl_items:
         if match_by_ids(item, stack):
             continue
@@ -173,16 +192,23 @@ def main():
         fuzzy_match_res = fuzzy_match(item, stack, CONFIG["fuzzy_threshold"])
         if fuzzy_match_res[0]:
             continue
-        else:
-            item['title'] = item['title']+color(f" ({fuzzy_match_res[1]}%)")
+
+        score = fuzzy_match_res[1]
+        item['match_score'] = score
+        item['title'] += color(f" ({score:.1f}%)")
         unmatched.append(item)
 
     print("\n📋 Unmatched Entries:")
-    for i in ["anime", "shows", "movies"]:
-        print("\n"+i)
-        for ii in unmatched:
-            if ii["type"] == i:
-                print(f"- {ii['title']}")
+    types = ["anime", "shows", "movies"]
+    for category in types:
+        group = [x for x in unmatched if x["type"] == category]
+        if not group:
+            continue
+
+        group = sorted(group, key=lambda x: x["match_score"], reverse=True)
+        print(f"\n{category.capitalize()}: {len(group)}")
+        for entry in group:
+            print(f"- {entry['title']}")
 
 if __name__ == "__main__":
     main()
